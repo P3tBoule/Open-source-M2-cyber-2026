@@ -1,0 +1,249 @@
+%YAML 1.1
+---
+# Suricata configuration
+af-packet:
+  - interface: eth0
+    cluster-id: 99
+    cluster-type: cluster_round_robin
+    defrag: yes
+  - interface: default
+    threads: auto
+    cluster-id: 99
+    cluster-type: cluster_round_robin
+    defrag: yes
+
+pfring:
+  - interface: default
+    threads: auto
+
+pcap:
+  - interface: default
+
+# Adresses de la couche applicative
+vars:
+  address-groups:
+    HOME_NET: "[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12]"
+    EXTERNAL_NET: "!$HOME_NET"
+    HTTP_SERVERS: "$HOME_NET"
+    SMTP_SERVERS: "$HOME_NET"
+    SQL_SERVERS: "$HOME_NET"
+    DNS_SERVERS: "$HOME_NET"
+    TELNET_SERVERS: "$HOME_NET"
+    AIM_SERVERS: "$EXTERNAL_NET"
+    DC_SERVERS: "$HOME_NET"
+    DNP3_SERVER: "$HOME_NET"
+    DNP3_CLIENT: "$HOME_NET"
+    MODBUS_CLIENT: "$HOME_NET"
+    MODBUS_SERVER: "$HOME_NET"
+    ENIP_CLIENT: "$HOME_NET"
+    ENIP_SERVER: "$HOME_NET"
+
+  port-groups:
+    HTTP_PORTS: "80"
+    SHELLCODE_PORTS: "!80"
+    ORACLE_PORTS: 1521
+    SSH_PORTS: 22
+    DNP3_PORTS: 20000
+    MODBUS_PORTS: 502
+    FILE_DATA_PORTS: "[$HTTP_PORTS,110,143]"
+    FTP_PORTS: 21
+    DCERPC_PORTS: "[135,139,445]"
+    CIDP_PORTS: 5000
+    MMSP_PORTS: 1755
+    RSYNC_PORTS: 873
+    OPENVPN_PORTS: 1194
+
+# Détection modes
+default-rule-path: /etc/suricata/rules
+rule-files:
+  - custom-rules.rules
+  - suricata.rules
+
+classification-file: /etc/suricata/classification.config
+reference-config-file: /etc/suricata/reference.config
+
+# Logging
+outputs:
+  - fast:
+      enabled: yes
+      filename: fast.log
+
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: eve.json
+      types:
+        - alert:
+            payload: yes
+            payload-printable: yes
+            http-body: yes
+            packets: yes
+        - http:
+            extended: yes
+        - dns:
+            enabled: yes
+            version: 2
+        - tls:
+            enabled: yes
+        - files:
+            enabled: yes
+        - flow:
+            enabled: yes
+        - netflow:
+            enabled: yes
+        - metadata:
+            enabled: yes
+        - stats:
+            enabled: yes
+        - dhcp:
+            enabled: yes
+        - ssh:
+            enabled: yes
+
+  - http-log:
+      enabled: yes
+      filename: http.log
+
+  - dns-log:
+      enabled: yes
+      filename: dns.log
+
+  - tls-log:
+      enabled: yes
+      filename: tls.log
+
+  - file-log:
+      enabled: yes
+      filename: files-json.log
+      filetype: regular
+      force-magic: no
+      force-md5: no
+
+  - stats:
+      enabled: yes
+      filename: stats.log
+      interval: 8
+
+  - unified2-alert:
+      enabled: no
+      filename: unified2.alert
+
+  - unified2-flow:
+      enabled: no
+      filename: unified2.flow
+
+# APP layer settings
+app-layer:
+  protocols:
+    tls:
+      enabled: yes
+      detection-ports:
+        dp: 443
+    dcerpc:
+      enabled: yes
+      detection-ports:
+        dp: 135
+    ftp:
+      enabled: yes
+    http:
+      enabled: yes
+      libhtp:
+        default-config:
+          personality: IEC_60870_4_PHOTOELECTRIC
+          request-body-limit: 100000
+          response-body-limit: 100000
+          double-decode-path: no
+          double-decode-query: no
+    http2:
+      enabled: yes
+    modbus:
+      enabled: no
+      detection-ports:
+        dp: 502
+    dnp3:
+      enabled: no
+      detection-ports:
+        dp: 20000
+    enip:
+      enabled: no
+      detection-ports:
+        dp: 44818
+      detection-ports-dp: 2222
+    ntp:
+      enabled: yes
+    dhcp:
+      enabled: yes
+    ssh:
+      enabled: yes
+    smtp:
+      enabled: yes
+    dns:
+      enabled: yes
+    template:
+      enabled: yes
+
+# Defrag settings
+defrag:
+  memcap: 32mb
+  prealloc: yes
+  timeout: 60
+
+# Flow settings
+flow:
+  memcap: 128mb
+  max-flows: 30000
+  lifetime: 30m
+  emergency-recovery: 30
+
+# Limiter les threads/workers pour économiser la RAM
+threading:
+  set-cpu-affinity: no
+  cpu-affinity:
+    - management-cpu-set:
+        cpu: [ 0 ]
+    - receive-cpu-set:
+        cpu: [ 0 ]
+    - worker-cpu-set:
+        cpu: [ 0 ]
+        mode: "balanced"
+        threads: 2
+
+pcap-file:
+  checksum-validation: auto
+
+# Performance
+performance:
+  sgh-mpm-context: auto
+  inspection-recursion-limit: 3000
+  evasion-counter-limit: 1000
+
+# Logging configuration
+logging:
+  default-log-level: notice
+  outputs:
+    - sanitize:
+        enabled: yes
+    - file:
+        enabled: yes
+        level: info
+        filename: /var/log/suricata/suricata.log
+    - syslog:
+        enabled: yes
+        facility: local5
+        format: "[%i] <%d> -- "
+
+# Profil des règles
+rule-types:
+  - classtype: network-scan
+    min-sid: 1
+    max-sid: 9999
+  - classtype: web-application-attack
+    min-sid: 10000
+    max-sid: 19999
+
+# Host OS fingerprinting
+host-os-policy:
+  windows: [0.0.0.0/0]
+  cisco: []
+  hpux: []
+  linux: []

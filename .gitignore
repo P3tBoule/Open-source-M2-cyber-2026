@@ -1,0 +1,107 @@
+# .gitignore pour le projet de sécurisation
+
+# Fichiers d'environnement
+.env
+.env.local
+.env.*.local
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# Logs
+/logs/
+*.log
+/var/log/
+/etc/wazuh/
+/etc/falco/
+/etc/suricata/
+
+# Certificats et clés (à générer localement)
+*.pem
+*.key
+*.crt
+*.csr
+acme.json
+
+# Données de persistence
+/database/pgdata/
+/wazuh/wazuh_indexer_ssl_certs/
+/wazuh/api_certs/
+/shuffle_app_hotload/
+/shuffle_elasticsearch_data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temporaire
+tmp/
+temp/
+*.tmp
+
+# Backup
+*.bak
+*.backup
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Application clonée (elle devrait être clonée par Ansible/deploy script)
+/app/
+
+# Artifacts de build
+*.tar
+*.tar.gz
+*.zip
+
+# Output files
+output.txt
+audit-report.json
+licenses.json
+sbom-reports/
+iac-reports/
+
+# Fichiers d'audit/security scan
+*.sarif
+*-scan.txt
+
+# Données de configuration sensibles
+secrets/
+.secrets

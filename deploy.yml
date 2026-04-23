@@ -1,0 +1,400 @@
+---
+- name: Sécurisation Globale de l'Application 3-Tiers
+  hosts: localhost
+  become: yes
+  gather_facts: yes
+
+  vars:
+    app_repo: "https://github.com/ynov-cd/Open-source-M2-cyber-2026"
+    app_path: "/opt/secure-app"
+    secure_repo: "{{ playbook_dir }}"
+    docker_compose_version: "v2.20.0"
+    domain_name: "localhost"
+
+  pre_tasks:
+    - name: Vérifier que la tâche s'exécute en tant que root
+      assert:
+        that:
+          - ansible_user_id == 0
+        fail_msg: "Ce playbook doit être exécuté avec sudo/root"
+
+    - name: Afficher les informations système
+      debug:
+        msg: "System: {{ ansible_os_family }}, Distribution: {{ ansible_distribution }}, Version: {{ ansible_distribution_version }}"
+
+  tasks:
+    # ==================== Installation des prérequis système ====================
+    - name: Mettre à jour le cache apt
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Installer les packages système requis
+      package:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - curl
+        - wget
+        - git
+        - python3
+        - python3-pip
+        - apt-transport-https
+        - ca-certificates
+        - gnupg
+        - lsb-release
+        - jq
+        - htop
+        - net-tools
+        - vim
+        - unzip
+
+    # ==================== Installation de Docker ====================
+    - name: Ajouter la clé GPG de Docker
+      apt_key:
+        url: https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Ajouter le repository Docker
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/{{ ansible_distribution | lower }} {{ ansible_distribution_release }} stable"
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Installer Docker
+      package:
+        name: docker-ce
+        state: present
+
+    - name: Installer Docker CLI
+      package:
+        name: docker-ce-cli
+        state: present
+
+    - name: Installer containerd.io
+      package:
+        name: containerd.io
+        state: present
+
+    - name: Démarrer le service Docker
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Vérifier l'installation de Docker
+      command: docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: Afficher la version de Docker
+      debug:
+        msg: "{{ docker_version.stdout }}"
+
+    # ==================== Installation de Docker Compose ====================
+    - name: Télécharger Docker Compose
+      get_url:
+        url: "https://github.com/docker/compose/releases/download/{{ docker_compose_version }}/docker-compose-{{ ansible_system | lower }}-{{ ansible_machine }}"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+
+    - name: Créer un symlink pour docker-compose
+      file:
+        src: /usr/local/bin/docker-compose
+        dest: /usr/bin/docker-compose
+        state: link
+        force: yes
+
+    - name: Vérifier l'installation de Docker Compose
+      command: docker-compose --version
+      register: compose_version
+      changed_when: false
+
+    - name: Afficher la version de Docker Compose
+      debug:
+        msg: "{{ compose_version.stdout }}"
+
+    # ==================== Configuration de Docker ====================
+    - name: Créer le groupe docker
+      group:
+        name: docker
+        state: present
+
+    - name: Ajouter l'utilisateur au groupe docker
+      user:
+        name: "{{ ansible_user_id }}"
+        groups: docker
+        append: yes
+      when: ansible_user_id != "root"
+
+    - name: Configurer Docker pour limiter les ressources
+      copy:
+        content: |
+          {
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "10m",
+              "max-file": "3"
+            },
+            "storage-driver": "overlay2",
+            "userland-proxy": false
+          }
+        dest: /etc/docker/daemon.json
+      notify: Redémarrer Docker
+
+    # ==================== Clonage des dépôts ====================
+    - name: Créer le répertoire d'application
+      file:
+        path: "{{ app_path }}"
+        state: directory
+        mode: '0755'
+
+    - name: Cloner le dépôt de l'application
+      git:
+        repo: "{{ app_repo }}"
+        dest: "{{ app_path }}/app"
+        version: main
+        single_branch: yes
+      register: app_clone
+
+    - name: Afficher le statut du clonage
+      debug:
+        msg: "Application clonée depuis {{ app_repo }}"
+
+    # ==================== Configuration de l'application ====================
+    - name: Copier les Dockerfiles
+      copy:
+        src: "{{ secure_repo }}/Dockerfile.{{ item }}"
+        dest: "{{ app_path }}/Dockerfile.{{ item }}"
+        mode: '0644'
+      loop:
+        - backend
+        - frontend
+
+    - name: Copier la configuration Nginx
+      copy:
+        src: "{{ secure_repo }}/nginx.conf"
+        dest: "{{ app_path }}/nginx.conf"
+        mode: '0644'
+
+    - name: Copier le docker-compose.yml
+      copy:
+        src: "{{ secure_repo }}/docker-compose.yml"
+        dest: "{{ app_path }}/docker-compose.yml"
+        mode: '0644'
+
+    - name: Copier le fichier .env
+      copy:
+        src: "{{ secure_repo }}/.env"
+        dest: "{{ app_path }}/.env"
+        mode: '0600'
+
+    - name: Créer les répertoires de configuration
+      file:
+        path: "{{ app_path }}/{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - traefik
+        - falco
+        - suricata
+        - suricata/rules
+        - wazuh/rules
+        - yara
+        - sigma
+        - shuffle
+        - database
+
+    # ==================== Configuration de la Stack de Sécurité ====================
+    - name: Copier la configuration Falco
+      copy:
+        src: "{{ secure_repo }}/falco/falco-rules.yaml"
+        dest: "{{ app_path }}/falco/falco-rules.yaml"
+        mode: '0644'
+
+    - name: Copier la configuration Suricata
+      copy:
+        src: "{{ secure_repo }}/suricata/suricata.yaml"
+        dest: "{{ app_path }}/suricata/suricata.yaml"
+        mode: '0644'
+
+    - name: Copier les règles Suricata
+      copy:
+        src: "{{ secure_repo }}/suricata/custom-rules.rules"
+        dest: "{{ app_path }}/suricata/rules/custom-rules.rules"
+        mode: '0644'
+
+    - name: Copier les règles personnalisées Wazuh
+      copy:
+        src: "{{ secure_repo }}/wazuh/rules/custom_rules.xml"
+        dest: "{{ app_path }}/wazuh/rules/custom_rules.xml"
+        mode: '0644'
+
+    - name: Copier les règles YARA
+      copy:
+        src: "{{ secure_repo }}/yara/nodejs_malware.yar"
+        dest: "{{ app_path }}/yara/nodejs_malware.yar"
+        mode: '0644'
+
+    - name: Copier les règles Sigma
+      copy:
+        src: "{{ secure_repo }}/sigma/detection_rules.yaml"
+        dest: "{{ app_path }}/sigma/detection_rules.yaml"
+        mode: '0644'
+
+    - name: Copier le workflow Shuffle
+      copy:
+        src: "{{ secure_repo }}/shuffle/wazuh-alert-workflow.json"
+        dest: "{{ app_path }}/shuffle/wazuh-alert-workflow.json"
+        mode: '0644'
+
+    - name: Copier le docker-compose de sécurité
+      copy:
+        src: "{{ secure_repo }}/docker-compose.security.yml"
+        dest: "{{ app_path }}/docker-compose.security.yml"
+        mode: '0644'
+
+    # ==================== Initialisation des certificats Wazuh ====================
+    - name: Créer les répertoires pour les certificats Wazuh
+      file:
+        path: "{{ app_path }}/wazuh/{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - wazuh_indexer_ssl_certs/certs
+        - api_certs
+
+    # ==================== Construction des images Docker ====================
+    - name: Build des images Docker
+      command: "docker-compose build"
+      args:
+        chdir: "{{ app_path }}"
+      register: build_result
+      retries: 3
+      delay: 10
+      until: build_result is succeeded
+
+    - name: Afficher le résultat du build
+      debug:
+        msg: "Images Docker construites avec succès"
+
+    # ==================== Démarrage de l'application ====================
+    - name: Créer les répertoires de data
+      file:
+        path: "{{ app_path }}/database/pgdata"
+        state: directory
+        mode: '0755'
+        owner: "999"
+        group: "999"
+
+    - name: Arrêter les conteneurs existants
+      command: "docker-compose down -v"
+      args:
+        chdir: "{{ app_path }}"
+      ignore_errors: yes
+
+    - name: Démarrer l'application avec Docker Compose
+      command: "docker-compose up -d"
+      args:
+        chdir: "{{ app_path }}"
+      register: compose_up
+      until: compose_up is succeeded
+      retries: 3
+      delay: 10
+
+    - name: Attendre que les services soient prêts
+      pause:
+        seconds: 30
+
+    - name: Vérifier le statut des conteneurs
+      command: "docker-compose ps"
+      args:
+        chdir: "{{ app_path }}"
+      register: compose_status
+
+    - name: Afficher le statut
+      debug:
+        msg: "{{ compose_status.stdout }}"
+
+    # ==================== Démarrage de la Stack de Sécurité ====================
+    - name: Arrêter la stack de sécurité existante
+      command: "docker-compose -f docker-compose.security.yml down -v"
+      args:
+        chdir: "{{ app_path }}"
+      ignore_errors: yes
+
+    - name: Démarrer la stack de sécurité
+      command: "docker-compose -f docker-compose.security.yml up -d"
+      args:
+        chdir: "{{ app_path }}"
+      register: security_up
+      until: security_up is succeeded
+      retries: 3
+      delay: 10
+
+    - name: Attendre le démarrage complet
+      pause:
+        seconds: 60
+
+    # ==================== Vérification finale ====================
+    - name: Vérifier l'accès à l'application
+      uri:
+        url: "http://localhost/"
+        method: GET
+        status_code: 200
+      register: app_health
+      retries: 5
+      delay: 10
+      until: app_health is succeeded
+
+    - name: Afficher l'URL de l'application
+      debug:
+        msg: "Application accessible sur http://localhost/"
+
+    - name: Afficher les URLs de la stack de sécurité
+      debug:
+        msg: |
+          === Stack de Sécurité ===
+          Wazuh Dashboard: https://localhost:443
+          Shuffle: http://localhost:3001
+          Traefik Dashboard: http://localhost:8080
+
+  handlers:
+    - name: Redémarrer Docker
+      systemd:
+        name: docker
+        state: restarted
+
+  post_tasks:
+    - name: Afficher le rapport de déploiement
+      debug:
+        msg: |
+          ========== DÉPLOIEMENT COMPLÉTÉ ==========
+          
+          Application:
+          - Frontend: http://localhost/
+          - Backend API: http://localhost/api/
+          - API Health: http://localhost:3000/health
+          - Database: postgresql://postgres@localhost:5432/appdb
+          
+          Reverse Proxy & Orchestration:
+          - Traefik Dashboard: http://localhost:8080
+          
+          Monitoring & Sécurité:
+          - Falco: Logs in /var/log/falco/
+          - Suricata: Logs in /var/log/suricata/
+          - Wazuh Manager: http://localhost:55000
+          - Wazuh Indexer: https://localhost:9200
+          - Wazuh Dashboard: https://localhost:443 (admin/admin)
+          - Shuffle SOAR: http://localhost:3001
+          
+          Répertoire d'application: {{ app_path }}
+          
+          Commandes utiles:
+          - docker-compose ps (voir les conteneurs)
+          - docker-compose logs -f (voir les logs)
+          - docker exec -it backend npm test (tests de l'app)
+          
+          ========================================

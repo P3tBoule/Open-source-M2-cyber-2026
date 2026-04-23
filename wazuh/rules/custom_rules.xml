@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<group name="custom_rules">
+  
+  <!-- Règles pour Falco alerts -->
+  <rule id="100001" level="12">
+    <decoded_as>json</decoded_as>
+    <match>Shell executed in Backend container</match>
+    <description>Détection - Exécution d'un shell dans le conteneur backend</description>
+    <group>shell_execution,backend_security</group>
+  </rule>
+
+  <rule id="100002" level="13">
+    <decoded_as>json</decoded_as>
+    <match>Sensitive file access in Backend</match>
+    <description>Alerte - Accès à un fichier sensible détecté dans le backend</description>
+    <group>sensitive_file_access,backend_security</group>
+  </rule>
+
+  <rule id="100003" level="11">
+    <decoded_as>json</decoded_as>
+    <match>Process execution from /tmp in Backend</match>
+    <description>Alerte - Exécution d'un processus depuis /tmp dans le backend</description>
+    <group>tmp_execution,backend_security</group>
+  </rule>
+
+  <!-- Règles pour Suricata alerts -->
+  <rule id="100010" level="12">
+    <decoded_as>json</decoded_as>
+    <match>SQL Injection Attempt</match>
+    <description>Alerte - Tentative d'injection SQL détectée</description>
+    <group>sql_injection,web_attack</group>
+  </rule>
+
+  <rule id="100011" level="13">
+    <decoded_as>json</decoded_as>
+    <match>OS Command Injection Attempt</match>
+    <description>Alerte CRITIQUE - Tentative d'injection de commande OS (RCE)</description>
+    <group>command_injection,rce,web_attack</group>
+  </rule>
+
+  <rule id="100012" level="12">
+    <decoded_as>json</decoded_as>
+    <match>Path Traversal Attempt</match>
+    <description>Alerte - Tentative de traversée de répertoire (../) détectée</description>
+    <group>path_traversal,web_attack</group>
+  </rule>
+
+  <rule id="100013" level="11">
+    <decoded_as>json</decoded_as>
+    <match>Cross-Site Scripting</match>
+    <description>Alerte - Tentative XSS détectée</description>
+    <group>xss,web_attack</group>
+  </rule>
+
+  <!-- Règles pour Traefik logs -->
+  <rule id="100020" level="3">
+    <log_format>nginx</log_format>
+    <description>Accès HTTP normal</description>
+    <group>web_access</group>
+  </rule>
+
+  <rule id="100021" level="10">
+    <log_format>nginx</log_format>
+    <match>404</match>
+    <description>Tentative d'accès à une ressource inexistante (404)</description>
+    <group>web_scan,web_attack</group>
+  </rule>
+
+  <rule id="100022" level="12">
+    <log_format>nginx</log_format>
+    <match>403</match>
+    <description>Accès refusé (403) - Tentative d'accès interdit</description>
+    <group>web_attack</group>
+  </rule>
+
+  <!-- Règles pour conteneur compromis -->
+  <rule id="100030" level="14">
+    <match>privileged</match>
+    <description>CRITIQUE - Processus privilégié détecté</description>
+    <group>privilege_escalation,container_security</group>
+  </rule>
+
+  <!-- Alertes d'aggrégation -->
+  <rule id="100100" level="13">
+    <if_matched_sid>100010</if_matched_sid>
+    <if_matched_sid>100011</if_matched_sid>
+    <if_matched_sid>100012</if_matched_sid>
+    <same_source_ip />
+    <frequency>3</frequency>
+    <timeframe>300</timeframe>
+    <description>Attaque Web multiple détectée - Multiple attacks from same source</description>
+    <group>web_attack_pattern</group>
+  </rule>
+
+  <rule id="100101" level="14">
+    <if_matched_sid>100001</if_matched_sid>
+    <if_matched_sid>100002</if_matched_sid>
+    <if_matched_sid>100003</if_matched_sid>
+    <same_source_ip />
+    <frequency>2</frequency>
+    <timeframe>60</timeframe>
+    <description>Compromission potentielle du conteneur backend</description>
+    <group>backend_security,compromise</group>
+  </rule>
+
+</group>

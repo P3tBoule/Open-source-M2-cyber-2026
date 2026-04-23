@@ -1,0 +1,60 @@
+# Custom Falco Rules pour application Node.js
+- rule: Shell executed in Backend container
+  desc: Détecte l'exécution d'un shell dans le conteneur backend
+  condition: >
+    spawned_process and
+    container.name = "backend" and
+    proc.name in (sh, bash, zsh, ksh, csh)
+  output: >
+    ALERT - Shell execution in backend container
+    (user=%user.name command=%proc.cmdline container=%container.name)
+  priority: CRITICAL
+  tags: [shell, backend, suspicious]
+
+- rule: Sensitive file access in Backend
+  desc: Détecte l'accès à des fichiers sensibles dans le backend
+  condition: >
+    open and
+    container.name = "backend" and
+    fd.name in (/etc/shadow, /etc/passwd, /root/.ssh, /proc/sysrq-trigger)
+  output: >
+    ALERT - Sensitive file access in backend
+    (user=%user.name file=%fd.name container=%container.name)
+  priority: HIGH
+  tags: [sensitive_files, backend]
+
+- rule: Process execution from /tmp in Backend
+  desc: Détecte l'exécution d'un processus depuis /tmp dans le backend
+  condition: >
+    spawned_process and
+    container.name = "backend" and
+    proc.cwd = /tmp
+  output: >
+    ALERT - Process execution from /tmp in backend
+    (user=%user.name process=%proc.name container=%container.name)
+  priority: HIGH
+  tags: [tmp_execution, backend, suspicious]
+
+- rule: Suspicious network activity
+  desc: Détecte les connexions réseau suspectes
+  condition: >
+    outbound and
+    container and
+    fd.sport != 3000 and fd.sport != 5432 and fd.sport != 80 and fd.sport != 443
+  output: >
+    ALERT - Suspicious outbound connection
+    (user=%user.name connection=%fd.name container=%container.name)
+  priority: WARNING
+  tags: [network, suspicious]
+
+- rule: Package installation in container
+  desc: Détecte les tentatives d'installation de paquets dans les conteneurs
+  condition: >
+    spawned_process and
+    container and
+    proc.name in (apt, apt-get, npm, pip, npm install, apk)
+  output: >
+    ALERT - Package installation attempted in container
+    (user=%user.name command=%proc.cmdline container=%container.name)
+  priority: HIGH
+  tags: [package_management, suspicious]

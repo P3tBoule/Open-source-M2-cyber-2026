@@ -1,0 +1,49 @@
+# Configuration des règles Falco par défaut
+# Ce fichier étend la configuration standard de Falco
+
+engine:
+  kind: modern_ebpf
+
+outputs:
+  - file_output:
+      enabled: true
+      keep_alive: false
+      filename: /var/log/falco/falco.log
+
+  - json_output:
+      enabled: true
+      filename: /var/log/falco/alerts.json
+
+  - syslog_output:
+      enabled: true
+
+syslog_output:
+  enabled: true
+
+file_output:
+  enabled: true
+  keep_alive: false
+  filename: /var/log/falco/falco.log
+
+json_output:
+  enabled: true
+  filename: /var/log/falco/alerts.json
+
+# Inclure les règles personnalisées
+rules_files:
+  - /etc/falco/rules.d/
+  - /etc/falco/rules.d/custom_rules.yaml
+
+# Configuration des watchdog
+watchdog:
+  - syscall_event_drop
+
+# Paramètres de performance
+modern_ebpf:
+  cpus_for_each_buffer: 2
+
+# Plugins (optionnels)
+plugins:
+  - name: cloudtrail
+    library_path: libcloudtrail.so
+    open_params: ""

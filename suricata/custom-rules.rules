@@ -1,0 +1,154 @@
+# Règles Suricata pour détection des attaques HTTP
+# Les règles suivantes détectent:
+# 1. Injection SQL
+# 2. Remote Code Execution (RCE)
+# 3. Path Traversal (../)
+
+alert http any any -> any any (
+  msg:"SQL Injection Attempt - Basic"; 
+  flow:to_server,established;
+  content:"POST"; http_method;
+  pcre:"/(\bunion\b|\bselect\b|\binsert\b|\bupdate\b|\bdelete\b|\bdrop\b|\bcreate\b|\balter\b|\bdeclare\b|\bexec\b|\bscript\b)/i";
+  classtype:web-application-attack;
+  sid:1000001;
+  rev:1;
+)
+
+alert http any any -> any any (
+  msg:"SQL Injection Attempt - UNION based";
+  flow:to_server,established;
+  content:"POST"; http_method;
+  pcre:"/union\s+select/i";
+  classtype:web-application-attack;
+  sid:1000002;
+  rev:1;
+)
+
+alert http any any -> any any (
+  msg:"SQL Injection Attempt - Boolean blind";
+  flow:to_server,established;
+  content:"GET"; http_method;
+  pcre:"/(\bor\b\s*['\"]?\d*['\"]?\s*=|['\"]?\d*['\"]\s*or\s*['\"]?\d*['\"]?\s*=)/i";
+  classtype:web-application-attack;
+  sid:1000003;
+  rev:1;
+)
+
+alert http any any -> any any (
+  msg:"OS Command Injection Attempt - Unix commands";
+  flow:to_server,established;
+  pcre:"/(%3b|;|%7c|\||%26|&|\`|%60|%24|\$)\s*(cat|ls|curl|wget|nc|bash|sh|chmod|chown|rm|mv|cp)/i";
+  classtype:web-application-attack;
+  sid:1000010;
+  rev:1;
+)
+
+alert http any any -> any any (
+  msg:"OS Command Injection Attempt - Command substitution";
+  flow:to_server,established;
+  pcre:"/(\$\(|`|%24%28).*(\)|%29)/";
+  classtype:web-application-attack;
+  sid:1000011;
+  rev:1;
+)
+
+alert http any any -> any any (
+  msg:"OS Command Injection Attempt - Pipe symbols";
+  flow:to_server,established;
+  pcre:"/(%7c|\|).*(%3e|>|%3c|<|%26|&)/";
+  classtype:web-application-attack;
+  sid:1000012;
+  rev:1;
+)
+
+alert http any any -> any any (
+  msg:"Path Traversal Attempt - Unix style";
+  flow:to_server,established;
+  pcre:"/(\.\.)\/|\.\.%2f|%2e%2e%2f|\.\.\\|%2e%2e%5c/i";
+  classtype:web-application-attack;
+  sid:1000020;
+  rev:1;
+)
+
+alert http any any -> any any (
+  msg:"Path Traversal Attempt - Multiple traversals";
+  flow:to_server,established;
+  pcre:"/(\.\.\/)(\.\.\/)(\.\.\/)(\.\.\/)(\.\.\/)(\.\.\/)(\.\.\/)(\.\.\/)(\.\.\/)(\.\.\/)(\.\.\/)(\.\.\/)(\.\.\/)(\.\.\/)(\.\.\/)(\.\.\/)etc\/passwd/i";
+  classtype:web-application-attack;
+  sid:1000021;
+  rev:1;
+)
+
+alert http any any -> any any (
+  msg:"Path Traversal Attempt - Windows style";
+  flow:to_server,established;
+  pcre:"/(\.\.)\\|\.\.%5c|%2e%2e%5c/i";
+  classtype:web-application-attack;
+  sid:1000022;
+  rev:1;
+)
+
+alert http any any -> any any (
+  msg:"Cross-Site Scripting (XSS) Attempt - Script tags";
+  flow:to_server,established;
+  pcre:"/(%3cscript|<script|%3cimg|<img|%3ciframe|<iframe|%3cbody|<body|%3cevt|<evt)/i";
+  classtype:web-application-attack;
+  sid:1000030;
+  rev:1;
+)
+
+alert http any any -> any any (
+  msg:"Suspicious JavaScript execution";
+  flow:to_server,established;
+  pcre:"/javascript:|eval\(|expression\(|onerror=|onload=/i";
+  classtype:web-application-attack;
+  sid:1000031;
+  rev:1;
+)
+
+alert http any any -> any any (
+  msg:"XML External Entity (XXE) Attempt";
+  flow:to_server,established;
+  content:"POST"; http_method;
+  pcre:"/<!ENTITY|SYSTEM|PUBLIC|DOCTYPE/i";
+  classtype:web-application-attack;
+  sid:1000040;
+  rev:1;
+)
+
+alert http any any -> any any (
+  msg:"Suspicious User-Agent - Automated tools";
+  flow:to_server,established;
+  http_user_agent; content:"sqlmap"; nocase;
+  classtype:web-application-attack;
+  sid:1000050;
+  rev:1;
+)
+
+alert http any any -> any any (
+  msg:"Suspicious User-Agent - curl/wget";
+  flow:to_server,established;
+  http_user_agent; content:"curl"; nocase;
+  classtype:web-application-attack;
+  sid:1000051;
+  rev:1;
+)
+
+alert http any any -> any any (
+  msg:"HTTP Method Anomaly - TRACE method";
+  flow:to_server,established;
+  content:"TRACE"; http_method;
+  classtype:web-application-attack;
+  sid:1000060;
+  rev:1;
+)
+
+alert http any any -> any any (
+  msg:"Large POST request - Possible DoS";
+  flow:to_server,established;
+  content:"POST"; http_method;
+  http_stat_msg; isdataat:!<0,relative>; byte_test:4,>,10485760,0,relative; 
+  classtype:denial-of-service;
+  sid:1000070;
+  rev:1;
+)

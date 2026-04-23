@@ -1,0 +1,169 @@
+{
+  "name": "Wazuh Alert Processing Workflow",
+  "description": "Workflow qui reçoit les alertes Wazuh via webhook et les traite",
+  "enabled": true,
+  "sharing": "private",
+  "owner": "admin",
+  "version": "1.0.0",
+  "created": "2026-04-23",
+  
+  "actions": [
+    {
+      "id": "webhook_receiver",
+      "name": "Receive Wazuh Alert",
+      "description": "Reçoit les alertes Wazuh via webhook POST",
+      "type": "http_server",
+      "trigger": true,
+      "config": {
+        "method": "POST",
+        "path": "/wazuh-alerts",
+        "content_type": "application/json"
+      },
+      "position": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "parse_alert",
+      "name": "Parse Alert Data",
+      "description": "Parse les données de l'alerte Wazuh",
+      "type": "json_parser",
+      "config": {
+        "input": "$webhook_receiver.body"
+      },
+      "position": {
+        "x": 1,
+        "y": 0
+      }
+    },
+    {
+      "id": "check_severity",
+      "name": "Check Alert Severity",
+      "description": "Vérifie la sévérité de l'alerte",
+      "type": "condition",
+      "config": {
+        "conditions": [
+          {
+            "field": "$parse_alert.rule.level",
+            "operator": ">=",
+            "value": 10
+          }
+        ]
+      },
+      "position": {
+        "x": 2,
+        "y": 0
+      }
+    },
+    {
+      "id": "send_notification",
+      "name": "Send Notification",
+      "description": "Envoie une notification via mail",
+      "type": "email",
+      "config": {
+        "to": "security@example.com",
+        "subject": "[WAZUH] Alert - $parse_alert.rule.description",
+        "body": "Rule: $parse_alert.rule.description\nSeverity: $parse_alert.rule.level\nAgent: $parse_alert.agent.name\nTimestamp: $parse_alert.timestamp"
+      },
+      "position": {
+        "x": 3,
+        "y": 0
+      }
+    },
+    {
+      "id": "create_incident",
+      "name": "Create Incident",
+      "description": "Crée un ticket d'incident dans un système de ticketing",
+      "type": "http_request",
+      "config": {
+        "url": "http://ticketing-system/api/incidents",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer YOUR_API_TOKEN"
+        },
+        "body": {
+          "title": "Security Alert: $parse_alert.rule.description",
+          "description": "Alert from Wazuh\n\nRule: $parse_alert.rule.description\nSeverity: $parse_alert.rule.level\nAgent: $parse_alert.agent.name",
+          "priority": "HIGH",
+          "type": "security_alert"
+        }
+      },
+      "position": {
+        "x": 4,
+        "y": 0
+      }
+    },
+    {
+      "id": "log_to_siem",
+      "name": "Log to SIEM",
+      "description": "Enregistre l'alerte dans le SIEM pour audit",
+      "type": "http_request",
+      "config": {
+        "url": "http://wazuh-indexer:9200/alerts/_doc",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "$parse_alert"
+      },
+      "position": {
+        "x": 5,
+        "y": 0
+      }
+    }
+  ],
+  
+  "branches": [
+    {
+      "source_action": "webhook_receiver",
+      "destination_action": "parse_alert",
+      "label": "success"
+    },
+    {
+      "source_action": "parse_alert",
+      "destination_action": "check_severity",
+      "label": "success"
+    },
+    {
+      "source_action": "check_severity",
+      "destination_action": "send_notification",
+      "label": "true",
+      "description": "If severity >= 10"
+    },
+    {
+      "source_action": "check_severity",
+      "destination_action": "log_to_siem",
+      "label": "false",
+      "description": "If severity < 10"
+    },
+    {
+      "source_action": "send_notification",
+      "destination_action": "create_incident",
+      "label": "success"
+    },
+    {
+      "source_action": "create_incident",
+      "destination_action": "log_to_siem",
+      "label": "success"
+    }
+  ],
+
+  "triggers": [
+    {
+      "trigger_type": "webhook",
+      "trigger_id": "wazuh_webhook",
+      "name": "Wazuh Alert Webhook",
+      "description": "Déclenche le workflow quand une alerte Wazuh arrive"
+    }
+  ],
+
+  "environment": {
+    "WAZUH_API_URL": "http://wazuh:55000",
+    "WAZUH_API_USER": "wazuh",
+    "WAZUH_API_PASSWORD": "SecurePassword123!",
+    "TICKETING_SYSTEM": "http://ticketing-system",
+    "NOTIFICATION_EMAIL": "security@example.com"
+  }
+}

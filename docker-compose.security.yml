@@ -1,0 +1,292 @@
+version: '3.9'
+
+# Stack de sécurité séparée de l'application
+
+services:
+  # Falco - Runtime Security Monitoring
+  falco:
+    image: falcosecurity/falco:latest
+    container_name: falco
+    restart: unless-stopped
+    privileged: true
+    networks:
+      - security
+    environment:
+      - FALCO_K8S_AUDIT_ENABLED=false
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - /dev:/host/dev
+      - /proc:/host/proc:ro
+      - /boot:/host/boot:ro
+      - /lib/modules:/host/lib/modules:ro
+      - /usr:/host/usr:ro
+      - /etc:/host/etc:ro
+      - ./falco/falco.yaml:/etc/falco/falco.yaml:ro
+      - ./falco/falco-rules.yaml:/etc/falco/rules.d/custom_rules.yaml:ro
+      - /var/log/falco:/var/log/falco
+    cap_add:
+      - SYS_PTRACE
+      - SYS_RESOURCE
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # Suricata - Network IDS/IPS
+  suricata:
+    image: jasonish/suricata:latest
+    container_name: suricata
+    restart: unless-stopped
+    networks:
+      - security
+    environment:
+      - SURICATA_STATS=yes
+    volumes:
+      - ./suricata/suricata.yaml:/etc/suricata/suricata.yaml:ro
+      - ./suricata/rules:/etc/suricata/rules:ro
+      - /var/log/suricata:/var/log/suricata
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+      - NET_RAW
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # Wazuh Manager - SIEM
+  wazuh:
+    image: wazuh/wazuh:latest
+    container_name: wazuh
+    restart: unless-stopped
+    environment:
+      - INDEXER_URL=https://wazuh-indexer:9200
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=SecurePassword123!
+      - FILEBEAT_SSL_VERIFICATION_MODE=full
+      - SSL_CERTIFICATE_AUTOGENERATION=true
+      - SSL_API_LEVEL=intermediate
+      - SSL_DEFAULT_TLS_VERSION=TLSv1_2
+      - SSL_CIPHERS=HIGH:!aNULL:!eNULL:!EXPORT:!DES:!MD5:!PSK:!RC4
+    networks:
+      - security
+    volumes:
+      - ./wazuh/wazuh_indexer_ssl_certs/:/etc/ssl/certs/
+      - ./wazuh/api_certs/:/etc/ssl/certs/
+      - wazuh_api_uid:/var/ossec/api/configuration
+      - wazuh_etc_uid:/var/ossec/etc
+      - wazuh_lib_uid:/var/ossec/var
+      - ./wazuh/rules/custom_rules.xml:/var/ossec/etc/rules/custom_rules.xml:ro
+    healthcheck:
+      test: curl -f http://localhost:55000/health/cluster/local || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    ports:
+      - "1514:1514"
+      - "1515:1515"
+      - "514:514/udp"
+      - "55000:55000"
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1024M
+        reservations:
+          cpus: '1'
+          memory: 512M
+
+  # Wazuh Indexer (OpenSearch)
+  wazuh-indexer:
+    image: wazuh/wazuh-indexer:latest
+    container_name: wazuh-indexer
+    restart: unless-stopped
+    environment:
+      - OPENSEARCH_JAVA_OPTS=-Xms1024m -Xmx1024m
+      - DISABLE_SECURITY_PLUGIN=false
+      - node.store.allow_mmap=false
+    networks:
+      - security
+    volumes:
+      - ./wazuh/wazuh_indexer_ssl_certs/:/usr/share/opensearch/certs/:ro
+      - wazuh_indexer_data:/var/lib/opensearch
+    healthcheck:
+      test: curl -f https://localhost:9200 -u admin:SecurePassword123! --insecure || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    ports:
+      - "9200:9200"
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1024M
+        reservations:
+          cpus: '1'
+          memory: 512M
+
+  # Wazuh Dashboard
+  wazuh-dashboard:
+    image: wazuh/wazuh-dashboard:latest
+    container_name: wazuh-dashboard
+    restart: unless-stopped
+    environment:
+      - OPENSEARCH_HOSTS=["https://wazuh-indexer:9200"]
+      - OPENSEARCH_USERNAME=admin
+      - OPENSEARCH_PASSWORD=SecurePassword123!
+    networks:
+      - security
+    volumes:
+      - ./wazuh/wazuh_indexer_ssl_certs/certs/node-1.pem:/usr/share/opensearch-dashboards/certs/node.pem:ro
+      - ./wazuh/wazuh_indexer_ssl_certs/certs/node-1-key.pem:/usr/share/opensearch-dashboards/certs/node-key.pem:ro
+      - ./wazuh/wazuh_indexer_ssl_certs/certs/root-ca.pem:/usr/share/opensearch-dashboards/certs/root-ca.pem:ro
+    ports:
+      - "443:5601"
+    depends_on:
+      - wazuh-indexer
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+  # Elasticsearch (optionnel pour alternative à Wazuh indexer)
+  # elasticsearch:
+  #   image: docker.elastic.co/elasticsearch/elasticsearch:8.0.0
+  #   container_name: elasticsearch
+  #   restart: unless-stopped
+  #   environment:
+  #     - discovery.type=single-node
+  #     - xpack.security.enabled=false
+  #   networks:
+  #     - security
+  #   ports:
+  #     - "9200:9200"
+
+  # Shuffle - SOAR/Orchestration
+  shuffle-backend:
+    image: frikky/shuffle:latest
+    container_name: shuffle-backend
+    restart: unless-stopped
+    networks:
+      - security
+    environment:
+      - ENVIRONMENT_NAME=production
+      - SHUFFLE_PASS_BACKEND_SYNC=SecurePassword123!
+      - SHUFFLE_ADMIN_USERNAME=admin
+      - SHUFFLE_ADMIN_PASSWORD=admin
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - SHUFFLE_ELASTIC_HOST=http://shuffle-elasticsearch:9200
+      - SHUFFLE_REDIS_HOST=shuffle-redis
+      - SHUFFLE_RABBITMQ_HOST=shuffle-rabbitmq
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - shuffle_app_hotload:/shuffle-workflows
+    ports:
+      - "5001:5001"
+    depends_on:
+      - shuffle-elasticsearch
+      - shuffle-redis
+      - shuffle-rabbitmq
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1024M
+        reservations:
+          cpus: '1'
+          memory: 512M
+
+  # Shuffle Frontend
+  shuffle-frontend:
+    image: frikky/shuffle-frontend:latest
+    container_name: shuffle-frontend
+    restart: unless-stopped
+    networks:
+      - security
+    ports:
+      - "3001:3001"
+    environment:
+      - REACT_APP_BACKEND_URL=http://localhost:5001
+    depends_on:
+      - shuffle-backend
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Shuffle dependencies
+  shuffle-elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.13.0
+    container_name: shuffle-elasticsearch
+    restart: unless-stopped
+    networks:
+      - security
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    volumes:
+      - shuffle_elasticsearch_data:/usr/share/elasticsearch/data
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  shuffle-redis:
+    image: redis:latest
+    container_name: shuffle-redis
+    restart: unless-stopped
+    networks:
+      - security
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  shuffle-rabbitmq:
+    image: rabbitmq:3-management
+    container_name: shuffle-rabbitmq
+    restart: unless-stopped
+    networks:
+      - security
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+networks:
+  security:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br_security
+
+volumes:
+  wazuh_api_uid:
+  wazuh_etc_uid:
+  wazuh_lib_uid:
+  wazuh_indexer_data:
+  shuffle_app_hotload:
+  shuffle_elasticsearch_data:

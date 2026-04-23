@@ -1,0 +1,254 @@
+name: Security Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  # Job 1: Scan des vulnérabilités applicatives
+  dependencies-scan:
+    runs-on: ubuntu-latest
+    name: Scan Dependencies Vulnerabilities
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install npm audit
+        run: npm install -g npm-audit-html
+
+      - name: Run npm audit for Backend
+        continue-on-error: true
+        working-directory: ./app/backend
+        run: |
+          npm audit --audit-level=high > audit-report.json || true
+          npm audit --json > audit-report.json || true
+
+      - name: Fail on high severity vulnerabilities
+        working-directory: ./app/backend
+        run: |
+          if [ -f audit-report.json ]; then
+            HIGH_VULNS=$(grep -c '"severity".*"high"' audit-report.json || true)
+            CRITICAL_VULNS=$(grep -c '"severity".*"critical"' audit-report.json || true)
+            if [ "$HIGH_VULNS" -gt 0 ] || [ "$CRITICAL_VULNS" -gt 0 ]; then
+              echo "❌ Found high/critical vulnerabilities"
+              cat audit-report.json
+              exit 1
+            fi
+          fi
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: audit-report
+          path: app/backend/audit-report.json
+
+  # Job 2: SBOM Generation et Analyse Trivy
+  sbom-analysis:
+    runs-on: ubuntu-latest
+    name: Generate and Analyze SBOM
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Trivy
+        run: |
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | apt-key add -
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | tee -a /etc/apt/sources.list.d/trivy.list
+          apt-get update
+          apt-get install -y trivy
+
+      - name: Generate SBOM for Backend
+        run: |
+          mkdir -p sbom-reports
+          trivy fs --format cyclonedx --output sbom-reports/backend-sbom.json app/backend/
+          trivy fs --format sarif --output sbom-reports/backend-vuln.sarif app/backend/ || true
+
+      - name: Scan SBOM for vulnerabilities
+        run: |
+          trivy fs --severity HIGH,CRITICAL app/backend/
+          
+          # Parser et afficher les vulnérabilités détectées
+          echo "=== Vulnerability Analysis ==="
+          trivy fs --format json app/backend/ | jq '.Results[] | select(.Vulnerabilities != null) | {Target, Vulnerabilities}' || true
+
+      - name: Upload SBOM reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: sbom-reports
+          path: sbom-reports/
+
+  # Job 3: Vérification des licences
+  license-check:
+    runs-on: ubuntu-latest
+    name: Check License Compliance
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install license checker
+        run: npm install -g license-checker
+
+      - name: Check licenses in Backend
+        working-directory: ./app/backend
+        run: |
+          license-checker --json > licenses.json || true
+          
+          # Vérifier les licences copyleft fort
+          echo "=== Checking for Copyleft Licenses ==="
+          COPYLEFT_LICENSES="AGPL|GPL|SSPL"
+          
+          if grep -q -E "$COPYLEFT_LICENSES" licenses.json; then
+            echo "❌ Found copyleft licenses that are not permitted"
+            grep -E "$COPYLEFT_LICENSES" licenses.json
+            exit 1
+          else
+            echo "✅ No forbidden copyleft licenses found"
+          fi
+
+      - name: List all licenses
+        working-directory: ./app/backend
+        run: license-checker --markdown
+
+      - name: Upload license report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: license-report
+          path: app/backend/licenses.json
+
+  # Job 4: Infrastructure as Code Analysis
+  iac-scan:
+    runs-on: ubuntu-latest
+    name: Scan Infrastructure as Code
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Trivy
+        run: |
+          apt-get update
+          apt-get install -y wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | apt-key add -
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | tee -a /etc/apt/sources.list.d/trivy.list
+          apt-get update
+          apt-get install -y trivy
+
+      - name: Scan Dockerfiles
+        run: |
+          mkdir -p iac-reports
+          echo "=== Scanning Dockerfile.backend ===" 
+          trivy config Dockerfile.backend --format sarif --output iac-reports/dockerfile-backend.sarif || true
+          trivy config Dockerfile.backend --format table
+          
+          echo "=== Scanning Dockerfile.frontend ===" 
+          trivy config Dockerfile.frontend --format sarif --output iac-reports/dockerfile-frontend.sarif || true
+          trivy config Dockerfile.frontend --format table
+
+      - name: Scan Docker Compose
+        run: |
+          echo "=== Scanning docker-compose.yml ===" 
+          trivy config docker-compose.yml --format sarif --output iac-reports/compose.sarif || true
+          trivy config docker-compose.yml --format table
+
+      - name: Check for security best practices
+        run: |
+          echo "=== Checking Dockerfile best practices ==="
+          
+          # Vérifications personnalisées
+          CHECK_FAILED=0
+          
+          # Backend checks
+          if ! grep -q "USER.*[^root]" Dockerfile.backend; then
+            echo "⚠️  Warning: Backend should run as non-root user"
+          fi
+          
+          if ! grep -q "health" Dockerfile.backend; then
+            echo "⚠️  Warning: Backend should have HEALTHCHECK"
+          fi
+          
+          # Frontend checks
+          if ! grep -q "USER.*[^root]" Dockerfile.frontend; then
+            echo "⚠️  Warning: Frontend should run as non-root user"
+          fi
+          
+          if ! grep -q "read_only_root_filesystem" docker-compose.yml; then
+            echo "⚠️  Warning: Containers should have read-only filesystems where possible"
+          fi
+          
+          echo "✅ Manual security checks completed"
+
+      - name: Upload IaC reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: iac-reports
+          path: iac-reports/
+
+  # Job 5: Build and Push Container Images (optionnel)
+  build-images:
+    needs: [dependencies-scan, sbom-analysis, license-check, iac-scan]
+    runs-on: ubuntu-latest
+    name: Build Docker Images
+    if: success()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Backend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.backend
+          push: false
+          tags: backend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build Frontend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.frontend
+          push: false
+          tags: frontend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image scan with Trivy
+        run: |
+          apt-get update && apt-get install -y trivy
+          docker build -t backend:latest -f Dockerfile.backend . --quiet || true
+          docker build -t frontend:latest -f Dockerfile.frontend . --quiet || true
+          
+          echo "=== Scanning Backend Image ===" || true
+          trivy image --severity HIGH,CRITICAL backend:latest --format table || true
+          
+          echo "=== Scanning Frontend Image ===" || true
+          trivy image --severity HIGH,CRITICAL frontend:latest --format table || true

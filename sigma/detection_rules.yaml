@@ -1,0 +1,144 @@
+title: Falco Shell Execution Detection
+id: falco-shell-execution-001
+date: 2026-04-23
+author: Security Team
+severity: high
+description: Détecte les exécutions de shell dans les conteneurs backend via les alertes Falco
+
+logsource:
+  product: falco
+  service: runtime-security
+
+detection:
+  selection:
+    msg: 'Shell executed in Backend container'
+    container_name: 'backend'
+    proc_name:
+      - 'sh'
+      - 'bash'
+      - 'zsh'
+      - 'ksh'
+      - 'csh'
+  condition: selection
+
+---
+
+title: Falco Sensitive File Access Detection
+id: falco-sensitive-access-001
+date: 2026-04-23
+author: Security Team
+severity: high
+description: Détecte l'accès à des fichiers sensibles dans les conteneurs
+
+logsource:
+  product: falco
+  service: runtime-security
+
+detection:
+  selection:
+    msg: 'Sensitive file access in Backend'
+    fd_name:
+      - '/etc/shadow'
+      - '/etc/passwd'
+      - '/root/.ssh'
+      - '/proc/sysrq-trigger'
+  condition: selection
+
+---
+
+title: Falco Tmp Execution Detection  
+id: falco-tmp-exec-001
+date: 2026-04-23
+author: Security Team
+severity: high
+description: Détecte l'exécution de processus depuis /tmp
+
+logsource:
+  product: falco
+  service: runtime-security
+
+detection:
+  selection:
+    msg: 'Process execution from /tmp in Backend'
+    proc_cwd: '/tmp'
+  condition: selection
+
+---
+
+title: Falco Package Installation Detection
+id: falco-package-install-001
+date: 2026-04-23
+author: Security Team
+severity: high
+description: Détecte les tentatives d'installation de paquets dans les conteneurs
+
+logsource:
+  product: falco
+  service: runtime-security
+
+detection:
+  selection:
+    msg: 'Package installation attempted in container'
+    proc_name:
+      - 'apt'
+      - 'apt-get'
+      - 'npm'
+      - 'pip'
+      - 'apk'
+  condition: selection
+
+---
+
+title: Wazuh Web Attack Pattern Detection
+id: wazuh-web-attack-001
+date: 2026-04-23
+author: Security Team
+severity: high
+description: Détecte les patterns d'attaque web multiples
+
+logsource:
+  product: wazuh
+  service: siem
+
+detection:
+  sql_injection:
+    rule.description: '*SQL Injection*'
+  command_injection:
+    rule.description: '*Command Injection*'
+  path_traversal:
+    rule.description: '*Path Traversal*'
+  
+  filter:
+    timeframe: 5m
+    threshold:
+      - 3 events
+  
+  condition: (sql_injection or command_injection or path_traversal) | stats count() by src_ip | where count >= 3
+
+---
+
+title: Backend Container Compromise Detection
+id: wazuh-backend-compromise-001
+date: 2026-04-23
+author: Security Team
+severity: critical
+description: Détecte les signes de compromission du conteneur backend
+
+logsource:
+  product: wazuh
+  service: siem
+
+detection:
+  shell_execution:
+    id: '100001'
+  sensitive_access:
+    id: '100002'
+  tmp_execution:
+    id: '100003'
+  
+  filter:
+    timeframe: 1m
+    threshold:
+      - 2 events
+  
+  condition: (shell_execution and sensitive_access) or (shell_execution and tmp_execution)
