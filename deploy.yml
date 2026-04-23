@@ -15,7 +15,7 @@
     - name: Vérifier que la tâche s'exécute en tant que root
       assert:
         that:
-          - ansible_user_id == 0
+          - ansible_user_uid == 0
         fail_msg: "Ce playbook doit être exécuté avec sudo/root"
 
     - name: Afficher les informations système
@@ -23,6 +23,20 @@
         msg: "System: {{ ansible_os_family }}, Distribution: {{ ansible_distribution }}, Version: {{ ansible_distribution_version }}"
 
   tasks:
+    # ==================== Nettoyage APT préalable ====================
+    - name: Nettoyer les éventuelles anciennes entrées Docker dans sources.list
+      lineinfile:
+        path: /etc/apt/sources.list
+        regexp: 'download\.docker\.com'
+        state: absent
+      when: ansible_os_family == "Debian"
+
+    - name: Supprimer tous les anciens fichiers de dépôts Docker dans sources.list.d
+      shell: grep -rl "download.docker.com" /etc/apt/sources.list.d/ | xargs rm -f
+      ignore_errors: yes
+      changed_when: false
+      when: ansible_os_family == "Debian"
+
     # ==================== Installation des prérequis système ====================
     - name: Mettre à jour le cache apt
       apt:
@@ -51,16 +65,25 @@
         - unzip
 
     # ==================== Installation de Docker ====================
-    - name: Ajouter la clé GPG de Docker
-      apt_key:
-        url: https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg
-        state: present
+    - name: Créer le répertoire pour les clés GPG d'apt
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+      when: ansible_os_family == "Debian"
+
+    - name: Télécharger et enregistrer la clé GPG de Docker
+      shell: |
+        curl -fsSL https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg | gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
+        chmod a+r /etc/apt/keyrings/docker.gpg
+      changed_when: false
       when: ansible_os_family == "Debian"
 
     - name: Ajouter le repository Docker
       apt_repository:
-        repo: "deb [arch=amd64] https://download.docker.com/linux/{{ ansible_distribution | lower }} {{ ansible_distribution_release }} stable"
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/{{ ansible_distribution | lower }} {{ ansible_distribution_release }} stable"
         state: present
+        filename: docker
       when: ansible_os_family == "Debian"
 
     - name: Installer Docker
@@ -156,7 +179,7 @@
         repo: "{{ app_repo }}"
         dest: "{{ app_path }}/app"
         version: main
-        single_branch: yes
+        depth: 1
       register: app_clone
 
     - name: Afficher le statut du clonage
@@ -210,9 +233,12 @@
     # ==================== Configuration de la Stack de Sécurité ====================
     - name: Copier la configuration Falco
       copy:
-        src: "{{ secure_repo }}/falco/falco-rules.yaml"
-        dest: "{{ app_path }}/falco/falco-rules.yaml"
+        src: "{{ secure_repo }}/falco/{{ item }}"
+        dest: "{{ app_path }}/falco/{{ item }}"
         mode: '0644'
+      loop:
+        - falco.yaml
+        - falco-rules.yaml
 
     - name: Copier la configuration Suricata
       copy:
@@ -293,6 +319,10 @@
       command: "docker-compose down -v"
       args:
         chdir: "{{ app_path }}"
+      ignore_errors: yes
+
+    - name: Nettoyer les réseaux Docker inutilisés pour éviter les conflits
+      command: "docker network prune -f"
       ignore_errors: yes
 
     - name: Démarrer l'application avec Docker Compose

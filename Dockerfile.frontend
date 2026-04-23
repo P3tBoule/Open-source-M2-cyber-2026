@@ -4,13 +4,10 @@ WORKDIR /app
 # Le frontend fourni est statique HTML/CSS/JS
 
 # Stage final avec Nginx léger
-FROM nginxinc/nginx-alpine:latest
+FROM nginx:alpine
 
 # Mettre à jour les packages
 RUN apk update && apk upgrade && rm -rf /var/cache/apk/*
-
-# Créer un utilisateur non-root pour nginx
-RUN addgroup -g 101 www-data && adduser -S www-data -u 101
 
 # Configuration nginx sécurisée
 RUN mkdir -p /etc/nginx/conf.d
@@ -20,9 +17,13 @@ COPY app/frontend/index.html /usr/share/nginx/html/
 COPY app/frontend/script.js /usr/share/nginx/html/
 COPY app/frontend/styles.css /usr/share/nginx/html/
 
-# Permissions
-RUN chown -R www-data:www-data /usr/share/nginx/html && \
-    chmod -R 755 /usr/share/nginx/html
+# Permissions pour l'utilisateur nginx existant
+RUN chown -R nginx:nginx /usr/share/nginx/html && \
+    chmod -R 755 /usr/share/nginx/html && \
+    chown -R nginx:nginx /var/cache/nginx && \
+    chown -R nginx:nginx /var/log/nginx && \
+    chown -R nginx:nginx /var/run && \
+    chmod -R 755 /var/cache/nginx /var/log/nginx
 
 # Port d'exposition
 EXPOSE 80

@@ -64,7 +64,7 @@ services:
 
   # Wazuh Manager - SIEM
   wazuh:
-    image: wazuh/wazuh:latest
+    image: wazuh/wazuh-manager:4.8.0
     container_name: wazuh
     restart: unless-stopped
     environment:
@@ -106,7 +106,7 @@ services:
 
   # Wazuh Indexer (OpenSearch)
   wazuh-indexer:
-    image: wazuh/wazuh-indexer:latest
+    image: wazuh/wazuh-indexer:4.8.0
     container_name: wazuh-indexer
     restart: unless-stopped
     environment:
@@ -136,7 +136,7 @@ services:
 
   # Wazuh Dashboard
   wazuh-dashboard:
-    image: wazuh/wazuh-dashboard:latest
+    image: wazuh/wazuh-dashboard:4.8.0
     container_name: wazuh-dashboard
     restart: unless-stopped
     environment:
@@ -150,7 +150,7 @@ services:
       - ./wazuh/wazuh_indexer_ssl_certs/certs/node-1-key.pem:/usr/share/opensearch-dashboards/certs/node-key.pem:ro
       - ./wazuh/wazuh_indexer_ssl_certs/certs/root-ca.pem:/usr/share/opensearch-dashboards/certs/root-ca.pem:ro
     ports:
-      - "443:5601"
+      - "8443:5601"
     depends_on:
       - wazuh-indexer
     deploy:
@@ -177,7 +177,7 @@ services:
 
   # Shuffle - SOAR/Orchestration
   shuffle-backend:
-    image: frikky/shuffle:latest
+    image: ghcr.io/shuffle/shuffle-backend:latest
     container_name: shuffle-backend
     restart: unless-stopped
     networks:
@@ -211,7 +211,7 @@ services:
 
   # Shuffle Frontend
   shuffle-frontend:
-    image: frikky/shuffle-frontend:latest
+    image: ghcr.io/shuffle/shuffle-frontend:latest
     container_name: shuffle-frontend
     restart: unless-stopped
     networks:

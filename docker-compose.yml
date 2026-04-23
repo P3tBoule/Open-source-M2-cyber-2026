@@ -3,7 +3,7 @@ version: '3.9'
 services:
   # Traefik Reverse Proxy
   traefik:
-    image: traefik:v3.0-alpine
+    image: traefik:latest
     container_name: traefik
     restart: unless-stopped
     security_opt:
@@ -61,7 +61,7 @@ services:
       start_period: 10s
     security_opt:
       - no-new-privileges:true
-    read_only_root_filesystem: true
+    read_only: true
     tmpfs:
       - /tmp
       - /var/run/postgresql
@@ -101,7 +101,7 @@ services:
       - "traefik.http.services.backend.loadbalancer.server.port=3000"
     security_opt:
       - no-new-privileges:true
-    read_only_root_filesystem: false
+    read_only: false
     cap_drop:
       - ALL
     cap_add:
@@ -138,7 +138,7 @@ services:
       - "traefik.http.services.frontend.loadbalancer.server.port=80"
     security_opt:
       - no-new-privileges:true
-    read_only_root_filesystem: true
+    read_only: true
     tmpfs:
       - /var/run
       - /var/cache/nginx
